@@ -1,6 +1,9 @@
 import sc2
+# from sc2.unit import Unit
+# from sc2.units import Units
 from sc2 import BotAI, Race
 from sc2.ids.unit_typeid import UnitTypeId
+from sc2.ids.ability_id import AbilityId
 from sc2.position import Point2, Point3
 
 
@@ -22,8 +25,6 @@ class CompetitiveBot(BotAI):
 
     async def on_start(self):
         print("Game started")
-        self.draw_ramp_points()
-        # Do things here before the game starts
 
     async def on_step(self, iteration):
         nexus = self.townhalls.ready.random
@@ -42,47 +43,51 @@ class CompetitiveBot(BotAI):
         await self.build_gateway(nexus)
 
         # Build Assimilators 
-        vgs = self.vespene_geyser.closer_than(15, nexus)
-        for vg in vgs:
-            if self.can_afford(UnitTypeId.ASSIMILATOR):
-                await self.build(UnitTypeId.ASSIMILATOR, vg)
+        await self.add_more_gas(nexus)
 
         # Build Infantries
-        await self.train_infantries(UnitTypeId.STALKER)
         await self.train_infantries(UnitTypeId.ZEALOT)
 
-        # Build Cybernetic Core
-        if (
-            self.can_afford(UnitTypeId.CYBERNETICSCORE) 
-            and not self.already_pending(UnitTypeId.CYBERNETICSCORE)
-            and self.structures(UnitTypeId.CYBERNETICSCORE).amount < 1
-        ):
-            pylon = self.structures(UnitTypeId.PYLON).ready.random
-            self.build(UnitTypeId.CYBERNETICSCORE, near=pylon)
-
-        # Build Stalkers
-
+        # Build Cybernetics Core
+        await self.build_cybernetics_core(nexus)
+        
         # Build Stargates
+        await self.build_stargates(nexus)
 
         # Build VoidRays
+        await self.manufacture_voidrays(UnitTypeId.VOIDRAY)
 
         # Attacks
 
-        # Expand to new Bases
-        if self.can_afford(UnitTypeId.NEXUS) and self.workers.amount > 21:
-            self.expand_now()
-
     async def train_infantries(self, UnitType):
         for GW in self.structures(UnitTypeId.GATEWAY).ready.idle:
-            if self.can_afford(UnitType):
+            if self.can_afford(UnitType) and self.units(UnitType).amount < 9 :
                 GW.train(UnitType)
-
-        if self.units(UnitType).amount > 12:
+    
+        if self.units(UnitTypeId.VOIDRAY).amount > 5: 
             for unit in self.units(UnitType).ready.idle:
                 targets = (self.enemy_units | self.enemy_structures).filter(lambda unit: unit.can_be_attacked)
                 if targets:
                     target = targets.closest_to(unit)
+                    unit.attack(target)
                 else:
+                    unit.attack(self.enemy_start_locations[0])
+               
+    async def manufacture_voidrays(self, UnitType):
+        for SG in self.structures(UnitTypeId.STARGATE).ready.idle:
+            if self.can_afford(UnitType):
+                SG.train(UnitType)
+
+        if self.units(UnitType).amount > 5:
+            for unit in self.units(UnitType).ready.idle:
+                if unit.weapon_cooldown > 0:
+                    unit(AbilityId.EFFECT_VOIDRAYPRISMATICALIGNMENT)
+                targets = (self.enemy_units | self.enemy_structures).filter(lambda unit: unit.can_be_attacked)
+                if targets:
+                    target = targets.closest_to(unit)
+                    unit.attack(target)
+                else:
+                    #unit.attack(self.enemy_start_locations[0])
                     unit.attack(self.enemy_start_locations[0])
 
     async def get_coordinates(self, nexus):
@@ -104,43 +109,46 @@ class CompetitiveBot(BotAI):
             and nexus.is_idle
             and self.workers.amount < self.townhalls.amount * 22
         ):
-            nexus.train(UnitTypeId.PROBE)
-            
+            nexus.train(UnitTypeId.PROBE)     
 
     # CONSTANTLY ADD MORE SUPPLIES UNTIL REACHING LIMITS
     async def add_new_supply(self, nexus):
-        if (self.supply_left < 2 and self.already_pending(UnitTypeId.PYLON) == 0):
+        if (self.supply_left < 4 and self.already_pending(UnitTypeId.PYLON) == 0):
             if self.can_afford(UnitTypeId.PYLON):
                 if self.supply_used > 16:
-                    await self.build(UnitTypeId.PYLON, near=nexus)
+                    await self.build(UnitTypeId.PYLON, near=nexus.position.towards(self.main_base_ramp.barracks_correct_placement,1))
                 else:
                     await self.build(
                         UnitTypeId.PYLON, 
                         Point2((
                             self.main_base_ramp.top_center.x + 3,
                             self.main_base_ramp.top_center.y + 3,
-                        ))
-)
+                        )))
+
+    # ADD more Gas 
+    async def add_more_gas(self, nexus):
+        vgs = self.vespene_geyser.closer_than(15, nexus)
+        for vg in vgs:
+            if self.can_afford(UnitTypeId.ASSIMILATOR):
+                await self.build(UnitTypeId.ASSIMILATOR, vg)
+                    
     # Build Infantry Training Buildings
     async def build_gateway(self, nexus):
-        if self.can_afford(UnitTypeId.GATEWAY) and self.structures(UnitTypeId.GATEWAY).amount < 4:
-            await self.build(UnitTypeId.GATEWAY, self.main_base_ramp.barracks_correct_placement)
+        if not self.structures(UnitTypeId.GATEWAY):
+            if self.can_afford(UnitTypeId.GATEWAY) and self.already_pending(UnitTypeId.GATEWAY) == 0:
+                await self.build(UnitTypeId.GATEWAY, self.main_base_ramp.barracks_correct_placement)
 
-    async def draw_ramp_points(self):
-        for ramp in self.game_info.map_ramps:
-            for p in ramp.points:
-                h2 = self.get_terrain_z_height(p)
-                pos = Point3((p.x, p.y, h2))
-                color = Point3((255, 0, 0))
-                if p in ramp.upper:
-                    color = Point3((0, 255, 0))
-                if p in ramp.upper2_for_ramp_wall:
-                    color = Point3((0, 255, 255))
-                if p in ramp.lower:
-                    color = Point3((0, 0, 255))
-                self._client.debug_box2_out(pos, half_vertex_length=0.25, color=color)
+    # Build Cybernetics Core to unlock Level 2 Building        
+    async def build_cybernetics_core(self, nexus):
+        if not self.structures(UnitTypeId.CYBERNETICSCORE):
+            pylon_ready = self.structures(UnitTypeId.PYLON).ready
+            if pylon_ready:
+                if self.can_afford(UnitTypeId.CYBERNETICSCORE) and self.already_pending(UnitTypeId.CYBERNETICSCORE) == 0:
+                    await self.build(UnitTypeId.CYBERNETICSCORE, near=pylon_ready.closest_to(nexus))
 
-
+    async def build_stargates(self, nexus):
+        if self.can_afford(UnitTypeId.STARGATE) and self.structures(UnitTypeId.STARGATE).amount < 3:
+            await self.build(UnitTypeId.STARGATE, near=nexus)
 
     def on_end(self, result):
         print("Game ended.")

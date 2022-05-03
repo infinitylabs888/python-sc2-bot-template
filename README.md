@@ -2,7 +2,7 @@
 
 ```
 ### Starting the Game
-$ python ./run.py --ComputerRace Random --ComputerDifficulty VeryHard --Map DiscoBloodbathLE --Realtime
+$ python ./go.py --ComputerRace Random --ComputerDifficulty VeryHard --Map DiscoBloodbathLE --Realtime
 
 
 ### Picking the race 
